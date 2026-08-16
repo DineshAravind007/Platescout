@@ -3,47 +3,52 @@ import cv2
 import easyocr
 import re
 import os
+from pathlib import Path
 
 
-# ============================================================
-# PATH CONFIGURATION
-# ============================================================
+# ==================================================
+# PROJECT PATHS
+# ==================================================
 
-# PlateScout project root
-BASE_DIR = os.path.dirname(
-    os.path.dirname(
-        os.path.abspath(__file__)
-    )
-)
+# Project root:
+# E:\PlateScout
+BASE_DIR = Path(__file__).resolve().parent.parent
 
-# YOLO model path
-MODEL_PATH = os.path.join(
-    BASE_DIR,
-    "models",
-    "best.pt"
-)
+# Models are stored in:
+# E:\PlateScout\models
+MODELS_DIR = BASE_DIR / "models"
 
-# Output folder
-OUTPUT_DIR = os.path.join(
-    BASE_DIR,
-    "outputs"
-)
+# Model file
+BEST_MODEL = MODELS_DIR / "best.pt"
 
-os.makedirs(OUTPUT_DIR, exist_ok=True)
+# Output folder:
+# E:\PlateScout\outputs
+OUTPUT_DIR = BASE_DIR / "outputs"
 
-
-# ============================================================
-# START MESSAGE
-# ============================================================
 
 print("===================================")
 print("PlateScout Pipeline Started")
 print("===================================")
 
+print("Project directory:", BASE_DIR)
+print("Models directory:", MODELS_DIR)
+print("YOLO model:", BEST_MODEL)
+print("Output directory:", OUTPUT_DIR)
 
-# ============================================================
+
+# ==================================================
+# CHECK MODEL
+# ==================================================
+
+if not BEST_MODEL.exists():
+    raise FileNotFoundError(
+        f"YOLO model not found:\n{BEST_MODEL}"
+    )
+
+
+# ==================================================
 # OCR READER
-# ============================================================
+# ==================================================
 
 reader = easyocr.Reader(
     ['en'],
@@ -51,23 +56,21 @@ reader = easyocr.Reader(
 )
 
 
-# ============================================================
+# ==================================================
 # YOLO MODEL
-# ============================================================
+# ==================================================
 
-print("Loading YOLO model:")
-print(MODEL_PATH)
-
-model = YOLO(MODEL_PATH)
+model = YOLO(str(BEST_MODEL))
 
 
-# ============================================================
+# ==================================================
 # OCR CLEANING
-# ============================================================
+# ==================================================
 
 def clean_plate_text(text):
     """
     Clean OCR output.
+
     Keep only English letters and numbers.
     """
 
@@ -83,9 +86,9 @@ def clean_plate_text(text):
     return text
 
 
-# ============================================================
+# ==================================================
 # PLATE FORMAT VALIDATION
-# ============================================================
+# ==================================================
 
 def is_valid_plate(text):
     """
@@ -98,8 +101,10 @@ def is_valid_plate(text):
     """
 
     pattern = (
-        r"^[A-Z]{2}[0-9]{1,2}"
-        r"[A-Z]{1,3}[0-9]{1,4}$"
+        r"^[A-Z]{2}"
+        r"[0-9]{1,2}"
+        r"[A-Z]{1,3}"
+        r"[0-9]{1,4}$"
     )
 
     return re.match(
@@ -108,21 +113,25 @@ def is_valid_plate(text):
     ) is not None
 
 
-# ============================================================
+# ==================================================
 # OCR
-# ============================================================
+# ==================================================
 
 def perform_ocr(plate):
 
     print("\nRunning enhanced OCR...")
 
+    # ----------------------------------------------
     # Make sure plate is valid
+    # ----------------------------------------------
+
     if plate is None or plate.size == 0:
         return None, 0.0
 
-    # --------------------------------------------------------
+
+    # ----------------------------------------------
     # Resize
-    # --------------------------------------------------------
+    # ----------------------------------------------
 
     upscaled = cv2.resize(
         plate,
@@ -132,18 +141,20 @@ def perform_ocr(plate):
         interpolation=cv2.INTER_CUBIC
     )
 
-    # --------------------------------------------------------
+
+    # ----------------------------------------------
     # Grayscale
-    # --------------------------------------------------------
+    # ----------------------------------------------
 
     gray = cv2.cvtColor(
         upscaled,
         cv2.COLOR_BGR2GRAY
     )
 
-    # --------------------------------------------------------
+
+    # ----------------------------------------------
     # CLAHE enhancement
-    # --------------------------------------------------------
+    # ----------------------------------------------
 
     clahe = cv2.createCLAHE(
         clipLimit=2.0,
@@ -152,9 +163,10 @@ def perform_ocr(plate):
 
     enhanced = clahe.apply(gray)
 
-    # --------------------------------------------------------
+
+    # ----------------------------------------------
     # Sharpen image
-    # --------------------------------------------------------
+    # ----------------------------------------------
 
     sharpen_kernel = cv2.getStructuringElement(
         cv2.MORPH_RECT,
@@ -167,9 +179,10 @@ def perform_ocr(plate):
         sharpen_kernel
     )
 
-    # --------------------------------------------------------
+
+    # ----------------------------------------------
     # OTSU threshold
-    # --------------------------------------------------------
+    # ----------------------------------------------
 
     _, otsu = cv2.threshold(
         enhanced,
@@ -178,9 +191,10 @@ def perform_ocr(plate):
         cv2.THRESH_BINARY + cv2.THRESH_OTSU
     )
 
-    # --------------------------------------------------------
+
+    # ----------------------------------------------
     # Adaptive threshold
-    # --------------------------------------------------------
+    # ----------------------------------------------
 
     adaptive = cv2.adaptiveThreshold(
         enhanced,
@@ -191,50 +205,45 @@ def perform_ocr(plate):
         11
     )
 
-    # --------------------------------------------------------
-    # Save preprocessing results
-    # --------------------------------------------------------
 
-    os.makedirs(
-        OUTPUT_DIR,
+    # ----------------------------------------------
+    # Create output directory
+    # ----------------------------------------------
+
+    OUTPUT_DIR.mkdir(
+        parents=True,
         exist_ok=True
     )
 
+
+    # ----------------------------------------------
+    # Save preprocessing results
+    # ----------------------------------------------
+
     cv2.imwrite(
-        os.path.join(
-            OUTPUT_DIR,
-            "ocr_original.jpg"
-        ),
+        str(OUTPUT_DIR / "ocr_original.jpg"),
         upscaled
     )
 
     cv2.imwrite(
-        os.path.join(
-            OUTPUT_DIR,
-            "ocr_enhanced.jpg"
-        ),
+        str(OUTPUT_DIR / "ocr_enhanced.jpg"),
         enhanced
     )
 
     cv2.imwrite(
-        os.path.join(
-            OUTPUT_DIR,
-            "ocr_otsu.jpg"
-        ),
+        str(OUTPUT_DIR / "ocr_otsu.jpg"),
         otsu
     )
 
     cv2.imwrite(
-        os.path.join(
-            OUTPUT_DIR,
-            "ocr_adaptive.jpg"
-        ),
+        str(OUTPUT_DIR / "ocr_adaptive.jpg"),
         adaptive
     )
 
-    # --------------------------------------------------------
+
+    # ----------------------------------------------
     # OCR configurations
-    # --------------------------------------------------------
+    # ----------------------------------------------
 
     images = [
         ("original", upscaled),
@@ -245,9 +254,16 @@ def perform_ocr(plate):
 
     all_results = []
 
+
+    # ----------------------------------------------
+    # Run OCR
+    # ----------------------------------------------
+
     for name, img in images:
 
-        print(f"\nOCR method: {name}")
+        print(
+            f"\nOCR method: {name}"
+        )
 
         try:
 
@@ -260,6 +276,7 @@ def perform_ocr(plate):
                     "0123456789"
                 )
             )
+
 
             for result in results:
 
@@ -275,6 +292,7 @@ def perform_ocr(plate):
                         text
                     )
 
+
                     if cleaned:
 
                         print(
@@ -284,6 +302,7 @@ def perform_ocr(plate):
                             f"{confidence:.2f}"
                         )
 
+
                         all_results.append(
                             {
                                 "text": cleaned,
@@ -292,24 +311,30 @@ def perform_ocr(plate):
                             }
                         )
 
+
         except Exception as error:
 
             print(
-                f"OCR error in {name}: {error}"
+                f"OCR error in {name}: "
+                f"{error}"
             )
 
-    # --------------------------------------------------------
+
+    # ----------------------------------------------
     # No OCR result
-    # --------------------------------------------------------
+    # ----------------------------------------------
 
     if not all_results:
+
         return None, 0.0
 
-    # --------------------------------------------------------
+
+    # ----------------------------------------------
     # Remove duplicate results
-    # --------------------------------------------------------
+    # ----------------------------------------------
 
     unique_results = {}
+
 
     for result in all_results:
 
@@ -317,19 +342,23 @@ def perform_ocr(plate):
 
         if (
             text not in unique_results
-            or result["confidence"]
-            > unique_results[text]["confidence"]
+            or
+            result["confidence"]
+            >
+            unique_results[text]["confidence"]
         ):
 
             unique_results[text] = result
+
 
     results = list(
         unique_results.values()
     )
 
-    # --------------------------------------------------------
+
+    # ----------------------------------------------
     # Prefer VALID Indian plate formats
-    # --------------------------------------------------------
+    # ----------------------------------------------
 
     valid_results = [
         result
@@ -339,9 +368,11 @@ def perform_ocr(plate):
         )
     ]
 
+
     if valid_results:
 
         # Highest confidence valid result
+
         best = max(
             valid_results,
             key=lambda x: x["confidence"]
@@ -350,14 +381,28 @@ def perform_ocr(plate):
     else:
 
         # Otherwise use highest confidence result
+
         best = max(
             results,
             key=lambda x: x["confidence"]
         )
 
-    print("\n===================================")
-    print("BEST OCR RESULT")
-    print("===================================")
+
+    # ----------------------------------------------
+    # Print best OCR result
+    # ----------------------------------------------
+
+    print(
+        "\n==================================="
+    )
+
+    print(
+        "BEST OCR RESULT"
+    )
+
+    print(
+        "==================================="
+    )
 
     print(
         "Plate:",
@@ -374,29 +419,54 @@ def perform_ocr(plate):
         best["method"]
     )
 
+
     return (
         best["text"],
         best["confidence"]
     )
 
 
-# ============================================================
+# ==================================================
 # MAIN PIPELINE
-# ============================================================
+# ==================================================
 
 def run_pipeline(image_path):
 
-    print("\n===================================")
-    print("Processing:", image_path)
-    print("===================================")
+    print(
+        "\n==================================="
+    )
 
-    # --------------------------------------------------------
-    # Read image
-    # --------------------------------------------------------
-
-    image = cv2.imread(
+    print(
+        "Processing:",
         image_path
     )
+
+    print(
+        "==================================="
+    )
+
+
+    # ----------------------------------------------
+    # Convert path to absolute path
+    # ----------------------------------------------
+
+    image_path = Path(image_path)
+
+    if not image_path.is_absolute():
+
+        image_path = (
+            BASE_DIR / image_path
+        )
+
+
+    # ----------------------------------------------
+    # Read image
+    # ----------------------------------------------
+
+    image = cv2.imread(
+        str(image_path)
+    )
+
 
     if image is None:
 
@@ -409,17 +479,19 @@ def run_pipeline(image_path):
             "error": "Could not read image"
         }
 
-    # --------------------------------------------------------
+
+    # ----------------------------------------------
     # YOLO detection
-    # --------------------------------------------------------
+    # ----------------------------------------------
 
     results = model(image)
 
     result = results[0]
 
-    # --------------------------------------------------------
+
+    # ----------------------------------------------
     # Check detection
-    # --------------------------------------------------------
+    # ----------------------------------------------
 
     if len(result.boxes) == 0:
 
@@ -429,19 +501,24 @@ def run_pipeline(image_path):
 
         return {
             "success": False,
-            "error": "No license plate detected"
+            "error":
+                "No license plate detected"
         }
+
 
     print(
         "License plate detected!"
     )
 
-    # --------------------------------------------------------
+
+    # ----------------------------------------------
     # Get best detection
-    # --------------------------------------------------------
+    # ----------------------------------------------
 
     best_box = None
+
     best_confidence = 0
+
 
     for box, confidence in zip(
         result.boxes.xyxy,
@@ -452,27 +529,39 @@ def run_pipeline(image_path):
             confidence.cpu().numpy()
         )
 
+
         if conf > best_confidence:
 
             best_confidence = conf
-            best_box = box.cpu().numpy()
 
+            best_box = (
+                box.cpu().numpy()
+            )
+
+
+    # ----------------------------------------------
     # Safety check
+    # ----------------------------------------------
+
     if best_box is None:
 
         return {
             "success": False,
-            "error": "Could not determine plate location"
+            "error":
+                "Could not determine "
+                "license plate location"
         }
 
-    # --------------------------------------------------------
+
+    # ----------------------------------------------
     # Coordinates
-    # --------------------------------------------------------
+    # ----------------------------------------------
 
     x1, y1, x2, y2 = map(
         int,
         best_box
     )
+
 
     print(
         "Plate coordinates:"
@@ -485,13 +574,15 @@ def run_pipeline(image_path):
         y2
     )
 
-    # --------------------------------------------------------
+
+    # ----------------------------------------------
     # Add small padding
-    # --------------------------------------------------------
+    # ----------------------------------------------
 
     height, width = image.shape[:2]
 
     padding = 5
+
 
     x1 = max(
         0,
@@ -513,40 +604,47 @@ def run_pipeline(image_path):
         y2 + padding
     )
 
-    # --------------------------------------------------------
+
+    # ----------------------------------------------
     # Crop plate
-    # --------------------------------------------------------
+    # ----------------------------------------------
 
     plate = image[
         y1:y2,
         x1:x2
     ]
 
+
     if plate.size == 0:
 
         return {
             "success": False,
-            "error": "Plate crop failed"
+            "error":
+                "Plate crop failed"
         }
 
-    # --------------------------------------------------------
-    # Save crop
-    # --------------------------------------------------------
 
-    os.makedirs(
-        OUTPUT_DIR,
+    # ----------------------------------------------
+    # Save crop
+    # ----------------------------------------------
+
+    OUTPUT_DIR.mkdir(
+        parents=True,
         exist_ok=True
     )
 
-    crop_path = os.path.join(
-        OUTPUT_DIR,
+
+    crop_path = (
+        OUTPUT_DIR /
         "pipeline_plate_crop.jpg"
     )
 
+
     cv2.imwrite(
-        crop_path,
+        str(crop_path),
         plate
     )
+
 
     print(
         "Plate cropped successfully!"
@@ -557,17 +655,19 @@ def run_pipeline(image_path):
         crop_path
     )
 
-    # --------------------------------------------------------
-    # OCR
-    # --------------------------------------------------------
 
-    plate_text, ocr_confidence = perform_ocr(
-        plate
+    # ----------------------------------------------
+    # OCR
+    # ----------------------------------------------
+
+    plate_text, ocr_confidence = (
+        perform_ocr(plate)
     )
 
-    # --------------------------------------------------------
+
+    # ----------------------------------------------
     # OCR failed
-    # --------------------------------------------------------
+    # ----------------------------------------------
 
     if not plate_text:
 
@@ -577,12 +677,14 @@ def run_pipeline(image_path):
 
         return {
             "success": False,
-            "error": "No text detected"
+            "error":
+                "No text detected"
         }
 
-    # --------------------------------------------------------
+
+    # ----------------------------------------------
     # Validate plate
-    # --------------------------------------------------------
+    # ----------------------------------------------
 
     if is_valid_plate(
         plate_text
@@ -594,9 +696,22 @@ def run_pipeline(image_path):
 
         plate_format = "INVALID"
 
-    print("\n===================================")
-    print("FINAL PIPELINE RESULT")
-    print("===================================")
+
+    # ----------------------------------------------
+    # Print final result
+    # ----------------------------------------------
+
+    print(
+        "\n==================================="
+    )
+
+    print(
+        "FINAL PIPELINE RESULT"
+    )
+
+    print(
+        "==================================="
+    )
 
     print(
         "Detected text:",
@@ -613,45 +728,70 @@ def run_pipeline(image_path):
         plate_format
     )
 
-    # --------------------------------------------------------
+
+    # ----------------------------------------------
     # Return result
-    # --------------------------------------------------------
+    # ----------------------------------------------
 
     return {
+
         "success": True,
-        "registration_number": plate_text,
-        "raw_text": plate_text,
-        "ocr_confidence": ocr_confidence,
-        "plate_format": plate_format
+
+        "registration_number":
+            plate_text,
+
+        "raw_text":
+            plate_text,
+
+        "ocr_confidence":
+            ocr_confidence,
+
+        "plate_format":
+            plate_format
     }
 
 
-# ============================================================
-# DIRECT TEST
-# ============================================================
+# ==================================================
+# PROCESS VEHICLE IMAGE
+# ==================================================
 
-if __name__ == "__main__":
+def process_vehicle_image(image_path):
 
-    image_path = os.path.join(
-        BASE_DIR,
-        "test_images",
-        "vehicle1.jpg"
-    )
-
-    result = run_pipeline(
+    return run_pipeline(
         image_path
     )
 
-    print("\n===================================")
-    print("FINAL RESULT")
-    print("===================================")
 
-    print(result)
+# ==================================================
+# DIRECT TEST
+# ==================================================
+
+if __name__ == "__main__":
+
+    test_image = (
+        BASE_DIR /
+        "test_images" /
+        "vehicle1.jpg"
+    )
 
 
-# ============================================================
-# FLASK APP COMPATIBILITY
-# ============================================================
+    result = run_pipeline(
+        test_image
+    )
 
-def process_vehicle_image(image_path):
-    return run_pipeline(image_path)
+
+    print(
+        "\n==================================="
+    )
+
+    print(
+        "FINAL RESULT"
+    )
+
+    print(
+        "==================================="
+    )
+
+    print(
+        result
+    )
