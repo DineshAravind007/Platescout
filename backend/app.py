@@ -13,15 +13,16 @@ from platescout_pipeline import process_vehicle_image
 app = Flask(__name__)
 CORS(app)
 
-# Folder for uploaded images
+
+# Temporary folder for uploaded images
 UPLOAD_FOLDER = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "test_images"
+    os.path.dirname(os.path.abspath(__file__)),
+    "temp_uploads"
 )
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
+app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER 
 
 
 # ==========================================
