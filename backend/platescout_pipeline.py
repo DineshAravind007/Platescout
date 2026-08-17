@@ -3,6 +3,7 @@ import cv2
 import easyocr
 import re
 import os
+import gc
 from pathlib import Path
 
 
@@ -10,30 +11,20 @@ from pathlib import Path
 # PROJECT PATHS
 # ==================================================
 
-# Project root:
-# E:\PlateScout
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# Models are stored in:
-# E:\PlateScout\models
 MODELS_DIR = BASE_DIR / "models"
 
-# Model file
 BEST_MODEL = MODELS_DIR / "best.pt"
 
-# Output folder:
-# E:\PlateScout\outputs
 OUTPUT_DIR = BASE_DIR / "outputs"
 
 
 print("===================================")
-print("PlateScout Pipeline Started")
+print("PlateScout Pipeline")
 print("===================================")
-
 print("Project directory:", BASE_DIR)
-print("Models directory:", MODELS_DIR)
 print("YOLO model:", BEST_MODEL)
-print("Output directory:", OUTPUT_DIR)
 
 
 # ==================================================
@@ -42,25 +33,105 @@ print("Output directory:", OUTPUT_DIR)
 
 if not BEST_MODEL.exists():
     raise FileNotFoundError(
-        f"YOLO model not found:\n{BEST_MODEL}"
+        f"YOLO model not found: {BEST_MODEL}"
     )
 
 
 # ==================================================
-# OCR READER
+# GLOBAL OBJECTS
 # ==================================================
 
-reader = easyocr.Reader(
-    ['en'],
-    gpu=False
-)
+# IMPORTANT:
+# Do NOT load YOLO and EasyOCR together.
+#
+# They will be loaded only when required.
+#
+# This reduces memory usage on Render.
+
+yolo_model = None
+ocr_reader = None
 
 
 # ==================================================
-# YOLO MODEL
+# LOAD YOLO MODEL
 # ==================================================
 
-model = YOLO(str(BEST_MODEL))
+def get_yolo_model():
+
+    global yolo_model
+
+    if yolo_model is None:
+
+        print("\nLoading YOLO model...")
+
+        yolo_model = YOLO(
+            str(BEST_MODEL)
+        )
+
+        print("YOLO model loaded.")
+
+    return yolo_model
+
+
+# ==================================================
+# RELEASE YOLO MODEL
+# ==================================================
+
+def release_yolo_model():
+
+    global yolo_model
+
+    if yolo_model is not None:
+
+        print("Releasing YOLO model...")
+
+        yolo_model = None
+
+        gc.collect()
+
+        print("YOLO model released.")
+
+
+# ==================================================
+# LOAD OCR
+# ==================================================
+
+def get_ocr_reader():
+
+    global ocr_reader
+
+    if ocr_reader is None:
+
+        print("\nLoading EasyOCR...")
+
+        ocr_reader = easyocr.Reader(
+            ['en'],
+            gpu=False,
+            verbose=False
+        )
+
+        print("EasyOCR loaded.")
+
+    return ocr_reader
+
+
+# ==================================================
+# RELEASE OCR
+# ==================================================
+
+def release_ocr_reader():
+
+    global ocr_reader
+
+    if ocr_reader is not None:
+
+        print("Releasing EasyOCR...")
+
+        ocr_reader = None
+
+        gc.collect()
+
+        print("EasyOCR released.")
 
 
 # ==================================================
@@ -68,15 +139,12 @@ model = YOLO(str(BEST_MODEL))
 # ==================================================
 
 def clean_plate_text(text):
-    """
-    Clean OCR output.
 
-    Keep only English letters and numbers.
-    """
+    if not text:
+        return ""
 
     text = text.upper()
 
-    # Remove spaces and special characters
     text = re.sub(
         r"[^A-Z0-9]",
         "",
@@ -91,14 +159,6 @@ def clean_plate_text(text):
 # ==================================================
 
 def is_valid_plate(text):
-    """
-    General Indian vehicle registration format.
-
-    Examples:
-        TN87C5106
-        KL56Q9009
-        KA01AB1234
-    """
 
     pattern = (
         r"^[A-Z]{2}"
@@ -119,32 +179,31 @@ def is_valid_plate(text):
 
 def perform_ocr(plate):
 
-    print("\nRunning enhanced OCR...")
-
-    # ----------------------------------------------
-    # Make sure plate is valid
-    # ----------------------------------------------
+    print("\n===================================")
+    print("Starting OCR")
+    print("===================================")
 
     if plate is None or plate.size == 0:
+
         return None, 0.0
 
 
-    # ----------------------------------------------
+    # ------------------------------------------------
     # Resize
-    # ----------------------------------------------
+    # ------------------------------------------------
 
     upscaled = cv2.resize(
         plate,
         None,
-        fx=4,
-        fy=4,
+        fx=3,
+        fy=3,
         interpolation=cv2.INTER_CUBIC
     )
 
 
-    # ----------------------------------------------
+    # ------------------------------------------------
     # Grayscale
-    # ----------------------------------------------
+    # ------------------------------------------------
 
     gray = cv2.cvtColor(
         upscaled,
@@ -152,9 +211,9 @@ def perform_ocr(plate):
     )
 
 
-    # ----------------------------------------------
-    # CLAHE enhancement
-    # ----------------------------------------------
+    # ------------------------------------------------
+    # CLAHE
+    # ------------------------------------------------
 
     clahe = cv2.createCLAHE(
         clipLimit=2.0,
@@ -164,25 +223,9 @@ def perform_ocr(plate):
     enhanced = clahe.apply(gray)
 
 
-    # ----------------------------------------------
-    # Sharpen image
-    # ----------------------------------------------
-
-    sharpen_kernel = cv2.getStructuringElement(
-        cv2.MORPH_RECT,
-        (3, 3)
-    )
-
-    sharpened = cv2.morphologyEx(
-        enhanced,
-        cv2.MORPH_GRADIENT,
-        sharpen_kernel
-    )
-
-
-    # ----------------------------------------------
-    # OTSU threshold
-    # ----------------------------------------------
+    # ------------------------------------------------
+    # OTSU
+    # ------------------------------------------------
 
     _, otsu = cv2.threshold(
         enhanced,
@@ -192,9 +235,9 @@ def perform_ocr(plate):
     )
 
 
-    # ----------------------------------------------
+    # ------------------------------------------------
     # Adaptive threshold
-    # ----------------------------------------------
+    # ------------------------------------------------
 
     adaptive = cv2.adaptiveThreshold(
         enhanced,
@@ -206,9 +249,9 @@ def perform_ocr(plate):
     )
 
 
-    # ----------------------------------------------
-    # Create output directory
-    # ----------------------------------------------
+    # ------------------------------------------------
+    # Output directory
+    # ------------------------------------------------
 
     OUTPUT_DIR.mkdir(
         parents=True,
@@ -216,9 +259,9 @@ def perform_ocr(plate):
     )
 
 
-    # ----------------------------------------------
-    # Save preprocessing results
-    # ----------------------------------------------
+    # ------------------------------------------------
+    # Save preprocessing images
+    # ------------------------------------------------
 
     cv2.imwrite(
         str(OUTPUT_DIR / "ocr_original.jpg"),
@@ -241,9 +284,12 @@ def perform_ocr(plate):
     )
 
 
-    # ----------------------------------------------
-    # OCR configurations
-    # ----------------------------------------------
+    # ------------------------------------------------
+    # Load OCR only now
+    # ------------------------------------------------
+
+    reader = get_ocr_reader()
+
 
     images = [
         ("original", upscaled),
@@ -252,17 +298,18 @@ def perform_ocr(plate):
         ("adaptive", adaptive)
     ]
 
+
     all_results = []
 
 
-    # ----------------------------------------------
-    # Run OCR
-    # ----------------------------------------------
+    # ------------------------------------------------
+    # OCR
+    # ------------------------------------------------
 
     for name, img in images:
 
         print(
-            f"\nOCR method: {name}"
+            f"OCR method: {name}"
         )
 
         try:
@@ -280,36 +327,41 @@ def perform_ocr(plate):
 
             for result in results:
 
-                if len(result) >= 3:
-
-                    text = result[1]
-
-                    confidence = float(
-                        result[2]
-                    )
-
-                    cleaned = clean_plate_text(
-                        text
-                    )
+                if len(result) < 3:
+                    continue
 
 
-                    if cleaned:
+                text = result[1]
 
-                        print(
-                            f"Detected: {text} | "
-                            f"Cleaned: {cleaned} | "
-                            f"Confidence: "
-                            f"{confidence:.2f}"
-                        )
+                confidence = float(
+                    result[2]
+                )
 
 
-                        all_results.append(
-                            {
-                                "text": cleaned,
-                                "confidence": confidence,
-                                "method": name
-                            }
-                        )
+                cleaned = clean_plate_text(
+                    text
+                )
+
+
+                if not cleaned:
+                    continue
+
+
+                print(
+                    f"Detected: {text} | "
+                    f"Cleaned: {cleaned} | "
+                    f"Confidence: "
+                    f"{confidence:.2f}"
+                )
+
+
+                all_results.append(
+                    {
+                        "text": cleaned,
+                        "confidence": confidence,
+                        "method": name
+                    }
+                )
 
 
         except Exception as error:
@@ -320,35 +372,49 @@ def perform_ocr(plate):
             )
 
 
-    # ----------------------------------------------
-    # No OCR result
-    # ----------------------------------------------
+    # ------------------------------------------------
+    # Remove large temporary images
+    # ------------------------------------------------
+
+    del upscaled
+    del gray
+    del enhanced
+    del otsu
+    del adaptive
+
+    gc.collect()
+
+
+    # ------------------------------------------------
+    # No results
+    # ------------------------------------------------
 
     if not all_results:
 
         return None, 0.0
 
 
-    # ----------------------------------------------
-    # Remove duplicate results
-    # ----------------------------------------------
+    # ------------------------------------------------
+    # Remove duplicates
+    # ------------------------------------------------
 
     unique_results = {}
 
 
-    for result in all_results:
+    for item in all_results:
 
-        text = result["text"]
+        text = item["text"]
+
 
         if (
             text not in unique_results
             or
-            result["confidence"]
+            item["confidence"]
             >
             unique_results[text]["confidence"]
         ):
 
-            unique_results[text] = result
+            unique_results[text] = item
 
 
     results = list(
@@ -356,22 +422,24 @@ def perform_ocr(plate):
     )
 
 
-    # ----------------------------------------------
-    # Prefer VALID Indian plate formats
-    # ----------------------------------------------
+    # ------------------------------------------------
+    # Prefer valid Indian plates
+    # ------------------------------------------------
 
     valid_results = [
-        result
-        for result in results
+
+        item
+
+        for item in results
+
         if is_valid_plate(
-            result["text"]
+            item["text"]
         )
+
     ]
 
 
     if valid_results:
-
-        # Highest confidence valid result
 
         best = max(
             valid_results,
@@ -380,29 +448,19 @@ def perform_ocr(plate):
 
     else:
 
-        # Otherwise use highest confidence result
-
         best = max(
             results,
             key=lambda x: x["confidence"]
         )
 
 
-    # ----------------------------------------------
-    # Print best OCR result
-    # ----------------------------------------------
+    # ------------------------------------------------
+    # Final OCR result
+    # ------------------------------------------------
 
-    print(
-        "\n==================================="
-    )
-
-    print(
-        "BEST OCR RESULT"
-    )
-
-    print(
-        "==================================="
-    )
+    print("\n===================================")
+    print("BEST OCR RESULT")
+    print("===================================")
 
     print(
         "Plate:",
@@ -432,36 +490,30 @@ def perform_ocr(plate):
 
 def run_pipeline(image_path):
 
-    print(
-        "\n==================================="
-    )
-
-    print(
-        "Processing:",
-        image_path
-    )
-
-    print(
-        "==================================="
-    )
-
-
-    # ----------------------------------------------
-    # Convert path to absolute path
-    # ----------------------------------------------
+    print("\n===================================")
+    print("Processing Vehicle")
+    print("===================================")
 
     image_path = Path(image_path)
+
 
     if not image_path.is_absolute():
 
         image_path = (
-            BASE_DIR / image_path
+            BASE_DIR /
+            image_path
         )
 
 
-    # ----------------------------------------------
+    print(
+        "Image:",
+        image_path
+    )
+
+
+    # ------------------------------------------------
     # Read image
-    # ----------------------------------------------
+    # ------------------------------------------------
 
     image = cv2.imread(
         str(image_path)
@@ -470,34 +522,95 @@ def run_pipeline(image_path):
 
     if image is None:
 
-        print(
-            "ERROR: Could not read image."
-        )
-
         return {
             "success": False,
-            "error": "Could not read image"
+            "error":
+                "Could not read image"
         }
 
 
-    # ----------------------------------------------
-    # YOLO detection
-    # ----------------------------------------------
+    # ------------------------------------------------
+    # Resize very large images
+    # ------------------------------------------------
 
-    results = model(image)
+    max_width = 1600
+
+    height, width = image.shape[:2]
+
+
+    if width > max_width:
+
+        scale = (
+            max_width /
+            width
+        )
+
+        new_width = max_width
+
+        new_height = int(
+            height * scale
+        )
+
+
+        image = cv2.resize(
+            image,
+            (
+                new_width,
+                new_height
+            ),
+            interpolation=cv2.INTER_AREA
+        )
+
+
+        print(
+            "Image resized to:",
+            new_width,
+            "x",
+            new_height
+        )
+
+
+    # ------------------------------------------------
+    # Load YOLO
+    # ------------------------------------------------
+
+    model = get_yolo_model()
+
+
+    # ------------------------------------------------
+    # YOLO detection
+    # ------------------------------------------------
+
+    print("\nRunning YOLO...")
+
+
+    results = model.predict(
+        source=image,
+        imgsz=416,
+        conf=0.25,
+        max_det=1,
+        verbose=False,
+        device="cpu"
+    )
+
 
     result = results[0]
 
 
-    # ----------------------------------------------
+    # ------------------------------------------------
     # Check detection
-    # ----------------------------------------------
+    # ------------------------------------------------
 
     if len(result.boxes) == 0:
 
         print(
             "No license plate detected."
         )
+
+        del results
+        del result
+
+        release_yolo_model()
 
         return {
             "success": False,
@@ -511,13 +624,13 @@ def run_pipeline(image_path):
     )
 
 
-    # ----------------------------------------------
+    # ------------------------------------------------
     # Get best detection
-    # ----------------------------------------------
+    # ------------------------------------------------
 
     best_box = None
 
-    best_confidence = 0
+    best_confidence = 0.0
 
 
     for box, confidence in zip(
@@ -526,7 +639,7 @@ def run_pipeline(image_path):
     ):
 
         conf = float(
-            confidence.cpu().numpy()
+            confidence.cpu().item()
         )
 
 
@@ -539,11 +652,16 @@ def run_pipeline(image_path):
             )
 
 
-    # ----------------------------------------------
+    # ------------------------------------------------
     # Safety check
-    # ----------------------------------------------
+    # ------------------------------------------------
 
     if best_box is None:
+
+        del results
+        del result
+
+        release_yolo_model()
 
         return {
             "success": False,
@@ -553,9 +671,9 @@ def run_pipeline(image_path):
         }
 
 
-    # ----------------------------------------------
+    # ------------------------------------------------
     # Coordinates
-    # ----------------------------------------------
+    # ------------------------------------------------
 
     x1, y1, x2, y2 = map(
         int,
@@ -564,10 +682,7 @@ def run_pipeline(image_path):
 
 
     print(
-        "Plate coordinates:"
-    )
-
-    print(
+        "Plate coordinates:",
         x1,
         y1,
         x2,
@@ -575,9 +690,9 @@ def run_pipeline(image_path):
     )
 
 
-    # ----------------------------------------------
-    # Add small padding
-    # ----------------------------------------------
+    # ------------------------------------------------
+    # Padding
+    # ------------------------------------------------
 
     height, width = image.shape[:2]
 
@@ -605,9 +720,9 @@ def run_pipeline(image_path):
     )
 
 
-    # ----------------------------------------------
+    # ------------------------------------------------
     # Crop plate
-    # ----------------------------------------------
+    # ------------------------------------------------
 
     plate = image[
         y1:y2,
@@ -617,6 +732,11 @@ def run_pipeline(image_path):
 
     if plate.size == 0:
 
+        del results
+        del result
+
+        release_yolo_model()
+
         return {
             "success": False,
             "error":
@@ -624,9 +744,9 @@ def run_pipeline(image_path):
         }
 
 
-    # ----------------------------------------------
+    # ------------------------------------------------
     # Save crop
-    # ----------------------------------------------
+    # ------------------------------------------------
 
     OUTPUT_DIR.mkdir(
         parents=True,
@@ -647,33 +767,54 @@ def run_pipeline(image_path):
 
 
     print(
-        "Plate cropped successfully!"
-    )
-
-    print(
-        "Saved to:",
-        crop_path
+        "Plate cropped successfully."
     )
 
 
-    # ----------------------------------------------
+    # =================================================
+    # IMPORTANT MEMORY STEP
+    # =================================================
+    #
+    # YOLO is no longer needed.
+    #
+    # Release YOLO BEFORE loading EasyOCR.
+    #
+    # This prevents both large ML models from
+    # occupying memory at the same time.
+    # =================================================
+
+    del results
+    del result
+    del model
+    del best_box
+
+    gc.collect()
+
+    release_yolo_model()
+
+
+    # ------------------------------------------------
     # OCR
-    # ----------------------------------------------
+    # ------------------------------------------------
 
     plate_text, ocr_confidence = (
         perform_ocr(plate)
     )
 
 
-    # ----------------------------------------------
+    # Release plate/image memory
+
+    del plate
+    del image
+
+    gc.collect()
+
+
+    # ------------------------------------------------
     # OCR failed
-    # ----------------------------------------------
+    # ------------------------------------------------
 
     if not plate_text:
-
-        print(
-            "No text detected."
-        )
 
         return {
             "success": False,
@@ -682,9 +823,9 @@ def run_pipeline(image_path):
         }
 
 
-    # ----------------------------------------------
-    # Validate plate
-    # ----------------------------------------------
+    # ------------------------------------------------
+    # Validate
+    # ------------------------------------------------
 
     if is_valid_plate(
         plate_text
@@ -697,24 +838,16 @@ def run_pipeline(image_path):
         plate_format = "INVALID"
 
 
-    # ----------------------------------------------
-    # Print final result
-    # ----------------------------------------------
+    # ------------------------------------------------
+    # Final result
+    # ------------------------------------------------
+
+    print("\n===================================")
+    print("FINAL PIPELINE RESULT")
+    print("===================================")
 
     print(
-        "\n==================================="
-    )
-
-    print(
-        "FINAL PIPELINE RESULT"
-    )
-
-    print(
-        "==================================="
-    )
-
-    print(
-        "Detected text:",
+        "Registration:",
         plate_text
     )
 
@@ -728,10 +861,6 @@ def run_pipeline(image_path):
         plate_format
     )
 
-
-    # ----------------------------------------------
-    # Return result
-    # ----------------------------------------------
 
     return {
 
@@ -780,18 +909,8 @@ if __name__ == "__main__":
     )
 
 
-    print(
-        "\n==================================="
-    )
+    print("\n===================================")
+    print("FINAL RESULT")
+    print("===================================")
 
-    print(
-        "FINAL RESULT"
-    )
-
-    print(
-        "==================================="
-    )
-
-    print(
-        result
-    )
+    print(result)
