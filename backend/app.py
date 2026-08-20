@@ -4,6 +4,7 @@ import os
 import traceback
 
 from platescout_pipeline import process_vehicle_image
+from vehicle_api import get_vehicle_details
 
 
 # ==========================================
@@ -11,18 +12,29 @@ from platescout_pipeline import process_vehicle_image
 # ==========================================
 
 app = Flask(__name__)
+
 CORS(app)
 
 
-# Temporary folder for uploaded images
+# ==========================================
+# Folder for uploaded images
+# ==========================================
+
 UPLOAD_FOLDER = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)),
-    "temp_uploads"
+    os.path.dirname(
+        os.path.dirname(
+            os.path.abspath(__file__)
+        )
+    ),
+    "test_images"
 )
 
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+os.makedirs(
+    UPLOAD_FOLDER,
+    exist_ok=True
+)
 
-app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER 
+app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 
 
 # ==========================================
@@ -31,9 +43,15 @@ app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 
 @app.route("/", methods=["GET"])
 def home():
+
     return jsonify({
-        "message": "PlateScout backend is running",
-        "status": "online"
+
+        "message":
+            "PlateScout backend is running",
+
+        "status":
+            "online"
+
     })
 
 
@@ -41,42 +59,63 @@ def home():
 # Analyze Vehicle
 # ==========================================
 
-@app.route("/api/analyze", methods=["POST"])
+@app.route(
+    "/api/analyze",
+    methods=["POST"]
+)
 def analyze_vehicle():
 
     try:
 
-        # --------------------------------------
-        # Check image
-        # --------------------------------------
+        # ======================================
+        # CHECK IMAGE
+        # ======================================
 
         if "image" not in request.files:
+
             return jsonify({
+
                 "success": False,
-                "error": "No image received."
+
+                "error":
+                    "No image received."
+
             }), 400
+
 
         image = request.files["image"]
 
+
         if image.filename == "":
+
             return jsonify({
+
                 "success": False,
-                "error": "No image selected."
+
+                "error":
+                    "No image selected."
+
             }), 400
 
 
-        # --------------------------------------
-        # Save uploaded image
-        # --------------------------------------
+        # ======================================
+        # SAVE UPLOADED IMAGE
+        # ======================================
 
         filename = "uploaded_vehicle.jpg"
 
+
         image_path = os.path.join(
+
             app.config["UPLOAD_FOLDER"],
+
             filename
+
         )
 
+
         image.save(image_path)
+
 
         print("\n================================")
         print("Image received from frontend:")
@@ -84,28 +123,55 @@ def analyze_vehicle():
         print("================================")
 
 
-        # --------------------------------------
-        # Run PlateScout Pipeline
-        # --------------------------------------
+        # ======================================
+        # RUN PLATESCOUT PIPELINE
+        # ======================================
 
-        result = process_vehicle_image(image_path)
+        result = process_vehicle_image(
+            image_path
+        )
+
 
         print("\n================================")
         print("PIPELINE RAW RESULT")
         print("================================")
+
         print(result)
 
 
-        # --------------------------------------
-        # Make sure result is a dictionary
-        # --------------------------------------
+        # ======================================
+        # CHECK PIPELINE RESULT
+        # ======================================
 
         if not isinstance(result, dict):
 
             return jsonify({
+
                 "success": False,
-                "error": "Pipeline returned an invalid result."
+
+                "error":
+                    "Pipeline returned an invalid result."
+
             }), 500
+
+
+        # ======================================
+        # CHECK PIPELINE SUCCESS
+        # ======================================
+
+        if result.get("success") is False:
+
+            return jsonify({
+
+                "success": False,
+
+                "error":
+                    result.get(
+                        "error",
+                        "Vehicle processing failed."
+                    )
+
+            }), 400
 
 
         # ======================================
@@ -113,11 +179,33 @@ def analyze_vehicle():
         # ======================================
 
         registration_number = (
-            result.get("registration_number")
-            or result.get("plate")
-            or result.get("cleaned_plate")
-            or result.get("text")
-            or ""
+
+            result.get(
+                "registration_number"
+            )
+
+            or
+
+            result.get(
+                "plate"
+            )
+
+            or
+
+            result.get(
+                "cleaned_plate"
+            )
+
+            or
+
+            result.get(
+                "text"
+            )
+
+            or
+
+            ""
+
         )
 
 
@@ -125,18 +213,29 @@ def analyze_vehicle():
         # GET OCR CONFIDENCE
         # ======================================
 
-        # Your pipeline uses "ocr_confidence".
-        # Older code may use "confidence".
-        # Support both.
-
         ocr_confidence = result.get(
+
             "ocr_confidence",
-            result.get("confidence", 0)
+
+            result.get(
+                "confidence",
+                0
+            )
+
         )
 
+
         try:
-            ocr_confidence = float(ocr_confidence)
-        except (TypeError, ValueError):
+
+            ocr_confidence = float(
+                ocr_confidence
+            )
+
+        except (
+            TypeError,
+            ValueError
+        ):
+
             ocr_confidence = 0.0
 
 
@@ -145,9 +244,21 @@ def analyze_vehicle():
         # ======================================
 
         raw_text = (
-            result.get("raw_text")
-            or result.get("text")
-            or registration_number
+
+            result.get(
+                "raw_text"
+            )
+
+            or
+
+            result.get(
+                "text"
+            )
+
+            or
+
+            registration_number
+
         )
 
 
@@ -156,61 +267,90 @@ def analyze_vehicle():
         # ======================================
 
         plate_format = result.get(
+
             "plate_format",
+
             "UNKNOWN"
+
         )
 
 
         # ======================================
         # GET VEHICLE INFORMATION
         # ======================================
+        #
+        # IMPORTANT:
+        #
+        # The vehicle information now comes
+        # from our SQLite database through
+        # vehicle_api.py.
+        #
+        # OCR gives us:
+        #
+        #     DL7CQ1939
+        #
+        # Then:
+        #
+        #     vehicle_api.py
+        #
+        # searches:
+        #
+        #     vehicles.db
+        #
+        # ======================================
 
-        vehicle_information = result.get(
-            "vehicle_information"
+        vehicle_information = (
+            get_vehicle_details(
+                registration_number
+            )
         )
 
-        if not isinstance(vehicle_information, dict):
-            vehicle_information = {}
 
+        # ======================================
+        # VEHICLE NOT FOUND
+        # ======================================
 
-        # --------------------------------------
-        # Fill missing vehicle information
-        # --------------------------------------
+        if vehicle_information is None:
 
-        vehicle_information.setdefault(
-            "registration_number",
-            registration_number
-        )
+            vehicle_information = {
 
-        vehicle_information.setdefault(
-            "vehicle_type",
-            "Unknown"
-        )
+                "registration_number":
+                    registration_number,
 
-        vehicle_information.setdefault(
-            "fuel_type",
-            "Unknown"
-        )
+                "vehicle_type":
+                    "Not Found",
 
-        vehicle_information.setdefault(
-            "registration_status",
-            "Unknown"
-        )
+                "manufacturer":
+                    "Not Found",
 
-        vehicle_information.setdefault(
-            "insurance_status",
-            "Unknown"
-        )
+                "model":
+                    "Not Found",
 
-        vehicle_information.setdefault(
-            "fitness_status",
-            "Unknown"
-        )
+                "fuel_type":
+                    "Not Found",
 
-        vehicle_information.setdefault(
-            "challan_count",
-            0
-        )
+                "registration_status":
+                    "Not Found",
+
+                "insurance_status":
+                    "Not Found",
+
+                "fitness_status":
+                    "Not Found",
+
+                "challan_count":
+                    0,
+
+                "source":
+                    "No database record",
+
+                "data_type":
+                    "NOT_FOUND",
+
+                "last_updated":
+                    None
+
+            }
 
 
         # ======================================
@@ -219,7 +359,8 @@ def analyze_vehicle():
 
         api_result = {
 
-            "success": True,
+            "success":
+                True,
 
             "registration_number":
                 registration_number,
@@ -235,6 +376,7 @@ def analyze_vehicle():
 
             "vehicle_information":
                 vehicle_information
+
         }
 
 
@@ -255,7 +397,9 @@ def analyze_vehicle():
         # SEND RESPONSE TO REACT
         # ======================================
 
-        return jsonify(api_result), 200
+        return jsonify(
+            api_result
+        ), 200
 
 
     # ==========================================
@@ -268,35 +412,69 @@ def analyze_vehicle():
         print("ERROR")
         print("================================")
 
-        print(str(e))
+        print(
+            str(e)
+        )
 
         traceback.print_exc()
 
         print("================================\n")
 
+
         return jsonify({
-            "success": False,
-            "error": str(e)
+
+            "success":
+                False,
+
+            "error":
+                str(e)
+
         }), 500
 
 
 # ==========================================
-# Run Flask Server
+# RUN FLASK SERVER
 # ==========================================
 
 if __name__ == "__main__":
 
-    print("======================================")
-    print("        PlateScout Backend")
-    print("======================================")
-    print("Backend starting...")
-    print("Upload folder:", UPLOAD_FOLDER)
-    print("API: http://127.0.0.1:5000")
-    print("======================================")
+    print(
+        "======================================"
+    )
 
-    if __name__ == "__main__":
-        app.run(
-            host="0.0.0.0",
-            port=int(os.environ.get("PORT", 5000)),
-            debug=False
+    print(
+        "        PlateScout Backend"
+    )
+
+    print(
+        "======================================"
+    )
+
+    print(
+        "Backend starting..."
+    )
+
+    print(
+        "Upload folder:",
+        UPLOAD_FOLDER
+    )
+
+    print(
+        "API:",
+        "http://127.0.0.1:5000"
+    )
+
+    print(
+        "======================================"
+    )
+
+
+    app.run(
+
+        host="0.0.0.0",
+
+        port=5000,
+
+        debug=True
+
     )
